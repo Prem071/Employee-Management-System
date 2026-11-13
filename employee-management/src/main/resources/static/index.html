@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Employee Manager</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: Arial, sans-serif; background: #f4f6f8; margin: 0; color: #222; }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 24px 16px; }
+  h1 { margin: 0 0 16px; }
+  .card { background: #fff; border-radius: 8px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+  h2 { margin: 0 0 12px; font-size: 18px; }
+  form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+  label { font-size: 12px; color: #555; display: block; margin-bottom: 3px; }
+  input { width: 100%; padding: 8px; font-size: 14px; border: 1px solid #bbb; border-radius: 4px; }
+  .actions { grid-column: 1 / -1; display: flex; gap: 8px; }
+  button { padding: 8px 14px; border: 0; border-radius: 4px; cursor: pointer; font-size: 14px; background: #2563eb; color: #fff; }
+  button.gray { background: #6b7280; }
+  button.red { background: #dc2626; }
+  button.small { padding: 4px 10px; font-size: 13px; }
+  #msg { padding: 10px 12px; border-radius: 4px; margin-bottom: 12px; display: none; }
+  .ok { background: #e6f4ea; color: #1e6b34; }
+  .err { background: #fdecea; color: #a12622; }
+  .bar { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; margin-bottom: 12px; }
+  .bar div { flex: 0 0 200px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border-bottom: 1px solid #e5e7eb; padding: 8px; text-align: left; font-size: 14px; }
+  th { background: #f9fafb; }
+  td.btns { white-space: nowrap; }
+  .pager { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
+  .empty { color: #777; padding: 12px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Employee Manager</h1>
+  <div id="msg"></div>
+
+  <div class="card">
+    <h2 id="formTitle">Add employee</h2>
+    <form id="form">
+      <div><label>First name</label><input id="firstName" required></div>
+      <div><label>Last name</label><input id="lastName" required></div>
+      <div><label>Email</label><input id="email" type="email" required></div>
+      <div><label>Department</label><input id="department" required></div>
+      <div><label>Job title</label><input id="jobTitle"></div>
+      <div><label>Salary</label><input id="salary" type="number" min="0" step="0.01"></div>
+      <div><label>Hire date</label><input id="hireDate" type="date"></div>
+      <div class="actions">
+        <button type="submit" id="saveBtn">Add employee</button>
+        <button type="button" class="gray" id="cancelBtn" style="display:none">Cancel edit</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Employees</h2>
+    <div class="bar">
+      <div><label>Filter by department</label><input id="filter" placeholder="e.g. IT"></div>
+      <button id="filterBtn">Search</button>
+      <button class="gray" id="clearBtn">Clear</button>
+    </div>
+    <table>
+      <thead>
+        <tr><th>ID</th><th>Name</th><th>Email</th><th>Department</th><th>Title</th><th>Salary</th><th>Hired</th><th></th></tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div id="empty" class="empty" style="display:none">No employees found.</div>
+    <div class="pager">
+      <button class="gray small" id="prev">Previous</button>
+      <span id="pageInfo"></span>
+      <button class="gray small" id="next">Next</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = "/api/employees";
+const PAGE_SIZE = 10;
+let page = 0, totalPages = 1, editingId = null, cache = [];
+
+const $ = id => document.getElementById(id);
+const fields = ["firstName", "lastName", "email", "department", "jobTitle", "salary", "hireDate"];
+
+function show(text, ok) {
+  const m = $("msg");
+  m.textContent = text;
+  m.className = ok ? "ok" : "err";
+  m.style.display = "block";
+}
+
+function errorText(status, data) {
+  let t = "Error " + status + ": " + ((data && data.message) || "something went wrong");
+  if (data && data.errors) t += " (" + Object.values(data.errors).join(", ") + ")";
+  return t;
+}
+
+async function load() {
+  const dept = $("filter").value.trim();
+  let url = API + "?page=" + page + "&size=" + PAGE_SIZE + "&sort=id";
+  if (dept) url += "&department=" + encodeURIComponent(dept);
+  let res;
+  try { res = await fetch(url); }
+  catch (e) { show("Cannot reach the server. Is the app running?", false); return; }
+  if (!res.ok) { show("Could not load employees (status " + res.status + ")", false); return; }
+  const data = await res.json();
+  cache = data.content || [];
+  totalPages = Math.max(data.totalPages || 1, 1);
+  render();
+  $("pageInfo").textContent = "Page " + (page + 1) + " of " + totalPages;
+  $("prev").disabled = page === 0;
+  $("next").disabled = page >= totalPages - 1;
+}
+
+function render() {
+  const rows = $("rows");
+  rows.innerHTML = "";
+  $("empty").style.display = cache.length ? "none" : "block";
+  cache.forEach(e => {
+    const tr = document.createElement("tr");
+    [e.id, e.firstName + " " + e.lastName, e.email, e.department, e.jobTitle, e.salary, e.hireDate]
+      .forEach(v => { const td = document.createElement("td"); td.textContent = v ?? ""; tr.appendChild(td); });
+    const td = document.createElement("td");
+    td.className = "btns";
+    const edit = document.createElement("button");
+    edit.textContent = "Edit"; edit.className = "small";
+    edit.onclick = () => startEdit(e);
+    const del = document.createElement("button");
+    del.textContent = "Delete"; del.className = "small red"; del.style.marginLeft = "6px";
+    del.onclick = () => remove(e);
+    td.append(edit, del);
+    tr.appendChild(td);
+    rows.appendChild(tr);
+  });
+}
+
+function startEdit(e) {
+  editingId = e.id;
+  fields.forEach(f => $(f).value = e[f] ?? "");
+  $("formTitle").textContent = "Edit employee #" + e.id;
+  $("saveBtn").textContent = "Save changes";
+  $("cancelBtn").style.display = "inline-block";
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function resetForm() {
+  editingId = null;
+  $("form").reset();
+  $("formTitle").textContent = "Add employee";
+  $("saveBtn").textContent = "Add employee";
+  $("cancelBtn").style.display = "none";
+}
+
+async function remove(e) {
+  if (!confirm("Delete " + e.firstName + " " + e.lastName + "?")) return;
+  const res = await fetch(API + "/" + e.id, { method: "DELETE" });
+  if (res.ok) {
+    show("Deleted " + e.firstName + " " + e.lastName, true);
+    if (editingId === e.id) resetForm();
+    if (cache.length === 1 && page > 0) page--;
+    load();
+  } else {
+    let data = null; try { data = await res.json(); } catch (x) {}
+    show(errorText(res.status, data), false);
+  }
+}
+
+$("form").addEventListener("submit", async ev => {
+  ev.preventDefault();
+  const body = {
+    firstName: $("firstName").value.trim(),
+    lastName: $("lastName").value.trim(),
+    email: $("email").value.trim(),
+    department: $("department").value.trim(),
+    jobTitle: $("jobTitle").value.trim() || null,
+    salary: $("salary").value === "" ? null : Number($("salary").value),
+    hireDate: $("hireDate").value || null
+  };
+  const updating = editingId !== null;
+  const res = await fetch(updating ? API + "/" + editingId : API, {
+    method: updating ? "PUT" : "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  let data = null; try { data = await res.json(); } catch (x) {}
+  if (res.ok) {
+    show((updating ? "Updated" : "Added") + " " + body.firstName + " " + body.lastName, true);
+    resetForm();
+    load();
+  } else {
+    show(errorText(res.status, data), false);
+  }
+});
+
+$("cancelBtn").onclick = resetForm;
+$("filterBtn").onclick = () => { page = 0; load(); };
+$("clearBtn").onclick = () => { $("filter").value = ""; page = 0; load(); };
+$("filter").addEventListener("keydown", e => { if (e.key === "Enter") { page = 0; load(); } });
+$("prev").onclick = () => { if (page > 0) { page--; load(); } };
+$("next").onclick = () => { if (page < totalPages - 1) { page++; load(); } };
+
+load();
+</script>
+</body>
+</html>
